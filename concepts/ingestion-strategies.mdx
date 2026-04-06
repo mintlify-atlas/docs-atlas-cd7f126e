@@ -1,0 +1,175 @@
+---
+title: "Ingestion strategies"
+description: "How Postcard fetches content from different social media platforms"
+---
+
+Content ingestion is the first stage of the forensic pipeline. Postcard uses a **Strategy Pattern** to select the most capable client for each platform, then falls back to a universal scraper when the primary client fails.
+
+## How the strategy pattern works
+
+The `UnifiedPostStrategy` class (defined in `src/lib/ingest/index.ts`) holds an ordered list of clients. When `fetch()` is called with a URL, it finds the first client whose `canHandle()` method returns `true` and delegates to it.
+
+```typescript
+export class UnifiedPostStrategy {
+  private clients: UnifiedPostClient[] = [
+    new RedditPostClient(),
+    new YoutubePostClient(),
+    new XPostClient(),
+    new InstagramPostClient(),
+    new TikTokPostClient(),
+    new JinaPostClient(), // Fallback — always returns true for canHandle()
+  ];
+
+  async fetch(url: string, onProgress?: (message: string) => void): Promise<UnifiedPost> {
+    const client = this.clients.find((c) => c.canHandle(url));
+    if (!client) {
+      throw new Error(`No client found for URL: ${url}`);
+    }
+
+    try {
+      return await client.fetch(url, onProgress);
+    } catch (error) {
+      console.warn(`Primary client (${client.constructor.name}) failed. Falling back to Jina...`, error);
+      if (client instanceof JinaPostClient) throw error;
+      onProgress?.("Falling back to Jina Post Client...");
+      return new JinaPostClient().fetch(url, onProgress);
+    }
+  }
+}
+```
+
+Because `JinaPostClient.canHandle()` always returns `true`, it acts as the catch-all fallback at the end of the list. If the primary client throws (e.g. HTTP 403, 404, or a rate limit), the strategy automatically retries with Jina Reader.
+
+## Fallback chain
+
+```
+URL received
+    │
+    ▼
+Platform-specific client (Reddit / YouTube / X / Instagram / TikTok)
+    │ success → UnifiedPost
+    │ failure (any error) ↓
+    ▼
+Jina Reader (r.jina.ai)
+    │ success → UnifiedPost (platform: "Other")
+    │ failure ↓
+    ▼
+Error propagated → pipeline sets status: "failed"
+```
+
+<Note>
+When Jina Reader is the primary client (i.e., the URL did not match any platform pattern), its failure is not retried — the error propagates directly.
+</Note>
+
+## Platform strategies
+
+| Platform | Client | Method | Auth required |
+|----------|--------|--------|---------------|
+| X / Twitter | `XPostClient` | oEmbed API (`publish.twitter.com/oembed`) | None for public posts |
+| Reddit | `RedditPostClient` | Native `.json` endpoint | None |
+| YouTube | `YoutubePostClient` | oEmbed API (`youtube.com/oembed`) | None |
+| Instagram | `InstagramPostClient` | Meta Graph API (`graph.facebook.com/instagram_oembed`) | `INSTAGRAM_ACCESS_TOKEN` required |
+| TikTok | `TikTokPostClient` | oEmbed API (`tiktok.com/oembed`) | None |
+| Any URL | `JinaPostClient` | Jina Reader (`r.jina.ai`) | None |
+
+### X / Twitter
+
+Uses the official Twitter oEmbed endpoint. No authentication is required for public tweets. The response includes `author_name`, `author_url`, and an HTML embed containing the tweet text.
+
+```typescript
+const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}`;
+```
+
+### Reddit
+
+Appends `.json` to the post URL to access Reddit's native JSON API. This returns character-perfect markdown content, absolute timestamps (Unix epoch), and full engagement counts (upvotes, comments, awards).
+
+```typescript
+const jsonUrl = url.endsWith(".json") ? url : `${url.replace(/\/$/, "")}.json`;
+```
+
+### YouTube
+
+Uses the YouTube oEmbed endpoint for video metadata. Community posts (URLs containing `/community` or `/channel/`) are not supported by the official oEmbed API and throw immediately, triggering a Jina fallback.
+
+```typescript
+const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+```
+
+### Instagram
+
+Uses the Meta Graph API oEmbed endpoint. This client only activates when `INSTAGRAM_ACCESS_TOKEN` is set — `canHandle()` returns `false` without it, causing the URL to fall through to Jina Reader.
+
+```typescript
+canHandle(url: string): boolean {
+  const hostname = new URL(url).hostname.toLowerCase();
+  const hasToken = !!process.env.INSTAGRAM_ACCESS_TOKEN;
+  return hostname.includes("instagram.com") && hasToken;
+}
+```
+
+### TikTok
+
+Uses the TikTok oEmbed endpoint. Note that the current implementation returns `platform: "Other"` for TikTok posts, as TikTok is not yet a first-class platform in the UI's enum.
+
+### Jina Reader
+
+The universal fallback. Calls `https://r.jina.ai/{encodedUrl}` and returns the full page as markdown. Always sets `platform: "Other"` since platform detection is not performed at this layer. When ingestion through Jina still fails (network error, non-200 response), the error propagates to the pipeline.
+
+<Tip>
+Setting `INSTAGRAM_ACCESS_TOKEN` in your environment is the only way to get structured Instagram post data. Without it, Instagram URLs fall through to Jina Reader, which may be blocked by Instagram's login wall.
+</Tip>
+
+## The UnifiedPost type
+
+Every ingestion strategy produces a `UnifiedPost` object. This is the standardized "ground truth" that the rest of the pipeline operates on.
+
+```typescript
+export interface UnifiedPost {
+  platform: "Reddit" | "YouTube" | "X" | "Instagram" | "Other";
+  title?: string;
+  markdown: string;
+  author?: string;
+  url: string;
+  timestamp?: Date;
+  engagement?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `platform` | Detected platform. Used to route scoring logic and display. |
+| `markdown` | Full post content as markdown. The primary input for corroboration. |
+| `author` | Author handle or display name, if available. |
+| `url` | The canonical URL of the post. |
+| `timestamp` | Absolute `Date` object, when available. Reddit provides this; oEmbed APIs generally do not. |
+| `engagement` | Platform-specific counts (upvotes, comments, etc.), stored as string key-value pairs. |
+| `metadata` | Any additional platform-specific fields (subreddit name, video thumbnail, etc.). |
+
+## Why platform-specific strategies matter
+
+Platform-specific clients provide significant advantages over general-purpose scraping:
+
+- **Absolute timestamps.** Reddit's `.json` endpoint returns `created_utc` (Unix epoch). Generic scrapers often return relative strings like "14h ago" that cannot be compared against a timeline.
+- **Author handles.** oEmbed responses include structured `author_name` fields. Scraped HTML may yield inconsistent display names.
+- **Login wall bypass.** Official API endpoints (oEmbed, Reddit JSON) are accessible without a browser session. Direct HTML scraping is frequently blocked by authentication redirects.
+- **Character-perfect content.** Reddit's JSON endpoint returns the raw `selftext` markdown without HTML encoding artifacts.
+
+## When ingestion fails
+
+The pipeline checks the scraped markdown for known failure signals before proceeding to corroboration:
+
+```typescript
+if (!markdown || markdown.length < 50) {
+  failureReasons.push("Content too short or empty");
+}
+if (markdown?.includes("Checking if the site connection is secure")) {
+  failureReasons.push("Cloudflare or security check detected");
+}
+if (markdown?.includes("login") || markdown?.includes("sign in")) {
+  failureReasons.push("Login or signup wall detected");
+}
+```
+
+When any of these conditions are met, the pipeline returns `verdict: "insufficient_data"` with a `postcardScore` of `0` and a summary explaining why the content could not be accessed. The raw markdown (however short or garbled) is still included in the response for transparency.

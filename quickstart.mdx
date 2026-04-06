@@ -1,80 +1,141 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Verify your first social media post in under a minute"
 ---
 
-## Get started in three steps
+Postcard is available as a hosted demo at [postcard.fartlabs.org](https://postcard.fartlabs.org). No account required — just a Google Gemini API key to start new analyses.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Get a free Gemini API key">
+    Postcard uses Google Gemini to power its corroboration and auditing stages. To start a new analysis, you need a free API key.
 
-### Step 1: Set up your local environment
+    1. Visit [aistudio.google.com/api-keys](https://aistudio.google.com/api-keys).
+    2. Sign in with your Google account.
+    3. Click **Create API key** and copy the generated key.
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    <Note>
+      Your API key is stored only in your browser as a cookie (`postcard_api_key`). It is never sent to Postcard's servers except to initiate a new analysis. Completed reports are public and require no key to view.
+    </Note>
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Add your API key in Settings">
+    1. Open [postcard.fartlabs.org](https://postcard.fartlabs.org).
+    2. Click **Settings** in the navigation.
+    3. Paste your Gemini API key into the **API key** field and save.
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    The key is now stored in your browser and will be sent automatically when you submit a new URL for analysis.
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Enter a post URL">
+    On the home page, paste any public social media post URL into the input field and press **Enter** or click **Trace**.
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    Supported platforms include:
 
-### Step 3: Go live
+    - X (Twitter): `https://x.com/user/status/...`
+    - Reddit: `https://www.reddit.com/r/.../comments/...`
+    - YouTube: `https://www.youtube.com/watch?v=...`
+    - Instagram, Bluesky, Threads, and generic public URLs
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Watch the forensic pipeline run">
+    After submission, Postcard runs a 4-stage forensic pipeline. You will see a real-time animation with progress messages as each stage completes:
+
+    | Stage | Message | Progress |
+    | :---- | :------ | :------- |
+    | `starting` | Initializing postcard... | 0% |
+    | `scraping` | Fetching post content... | 10% |
+    | `scraped` | Fetched content | 30% |
+    | `corroborating` | Searching for primary sources... | 40% |
+    | `auditing` | Verifying origin and temporal alignment... | 70% |
+    | `scoring` | Calculating Postcard score... | 90% |
+    | `complete` | Postcard complete | 100% |
+
+    If a stage takes longer than expected, Postcard displays heartbeat messages (e.g., "Searching deep...", "Analyzing metadata...") to confirm the pipeline is still active.
+  </Step>
+
+  <Step title="Read the forensic report">
+    When the pipeline completes, Postcard displays the full forensic report. The report includes:
+
+    - **Postcard Score** — A 0–100% credibility score.
+    - **Origin subscore** — Whether the post is reachable at its claimed URL.
+    - **Temporal subscore** — Whether timestamps align with the reported narrative.
+    - **Corroboration subscore** — Evidence found on trusted news and fact-checking domains.
+    - **Bias subscore** — The ratio of supporting to total corroborating sources.
+    - **Primary sources** — Links to independent articles and reports that reference the content.
+    - **Corroboration log** — A step-by-step audit trail of every search query executed.
+
+    A higher score indicates the post is likely authentic and well-corroborated. A lower score indicates content drift, inaccessible origins, or a lack of independent verification.
+  </Step>
+</Steps>
+
+## Use the public API
+
+You can also submit URLs programmatically without using the UI. The API follows a submit-then-poll pattern.
+
+**Submit a URL for analysis:**
+
+```bash
+curl -X POST "https://postcard.fartlabs.org/api/postcards" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://x.com/user/status/123",
+    "userApiKey": "YOUR_GEMINI_API_KEY"
+  }'
+```
+
+**Response (202 Accepted):**
+
+```json
+{
+  "id": "abc-123",
+  "status": "processing",
+  "message": "Forensic trace initialized."
+}
+```
+
+**Poll for results:**
+
+```bash
+curl "https://postcard.fartlabs.org/api/postcards?url=https://x.com/user/status/123"
+```
+
+**Full polling loop example:**
+
+```bash
+# Start analysis
+JOB=$(curl -s -X POST "https://postcard.fartlabs.org/api/postcards" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://x.com/user/status/123" }' | jq -r '.id')
+
+# Poll for completion
+while true; do
+  RESPONSE=$(curl -s "https://postcard.fartlabs.org/api/postcards?url=https://x.com/user/status/123")
+  STATUS=$(echo "$RESPONSE" | jq -r '.status')
+
+  if [ "$STATUS" = "completed" ]; then
+    echo "$RESPONSE" | jq '.postcard'
+    break
+  elif [ "$STATUS" = "failed" ]; then
+    echo "Error: $(echo '$RESPONSE' | jq -r '.error')"
+    break
+  fi
+
+  echo "Progress: $(echo '$RESPONSE' | jq -r '.progress // 0')"
+  sleep 3
+done
+```
+
+<Note>
+  The `GET /api/postcards?url=` endpoint is read-only and does not trigger new analyses. To start a fresh trace, use `POST /api/postcards`. Pass `"refresh": true` in the body to force re-analysis of a previously cached URL.
+</Note>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="How it works" icon="diagram-project" href="/how-it-works">
+    Learn how each stage of the forensic pipeline operates under the hood
+  </Card>
+  <Card title="API reference" icon="code" href="/api-reference/overview">
+    Full endpoint documentation for programmatic access
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

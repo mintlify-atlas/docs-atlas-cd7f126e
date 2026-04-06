@@ -1,0 +1,147 @@
+---
+title: "Database"
+description: "Configure and manage the Postcard database with Drizzle ORM and Turso"
+---
+
+Postcard uses [Drizzle ORM](https://orm.drizzle.team/) with libSQL (SQLite) and [Turso](https://turso.tech) for type-safe persistence of forensic audit logs and analysis results.
+
+## Local development (default)
+
+No database setup is needed for local development. When `TURSO_DATABASE_URL` is not set, Postcard automatically uses a local SQLite file named `local.db` in the project root.
+
+```bash
+# No configuration needed — this is the default behavior
+npm run db:push   # creates local.db and syncs the schema
+```
+
+<Tip>
+  Use `npm run db:studio` to open Drizzle Studio, a visual browser-based interface for inspecting your local forensic audit logs. This is especially helpful for debugging pipeline outputs, verifying score calculations, and browsing raw corroboration data.
+</Tip>
+
+## Turso cloud setup
+
+For production or cloud testing, connect Postcard to a persistent Turso cloud database.
+
+<Steps>
+  <Step title="Create a Turso account">
+    Create a free account at [turso.tech](https://turso.tech) and install the Turso CLI.
+  </Step>
+
+  <Step title="Create a database">
+    ```bash
+    turso db create postcard-db
+    ```
+  </Step>
+
+  <Step title="Get the database URL">
+    ```bash
+    turso db show postcard-db --url
+    ```
+  </Step>
+
+  <Step title="Generate an auth token">
+    ```bash
+    turso db tokens create postcard-db
+    ```
+  </Step>
+
+  <Step title="Add credentials to .env">
+    Add the URL and token to your `.env` file:
+
+    ```bash
+    TURSO_DATABASE_URL=libsql://your-database.turso.io
+    TURSO_AUTH_TOKEN=your-auth-token
+    ```
+  </Step>
+
+  <Step title="Apply the schema">
+    ```bash
+    npm run db:push
+    ```
+  </Step>
+</Steps>
+
+Drizzle automatically detects the `libsql://` prefix and switches to the Turso dialect. The local `local.db` file is ignored when `TURSO_DATABASE_URL` is set.
+
+## Schema overview
+
+Postcard's schema is defined in `src/db/schema.ts` and contains two tables.
+
+### `posts` table
+
+Stores the source post URL and its scraped content.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | text (PK) | Unique identifier for the post. |
+| `url` | text | The original post URL. Must be unique. |
+| `platform` | text | The detected social media platform (e.g. `twitter`, `reddit`). |
+| `markdown` | text | Full scraped content of the post, converted to Markdown. |
+| `username` | text | Username or handle of the post author. |
+| `timestamp_text` | text | Raw timestamp string extracted from the post. |
+| `main_text` | text | Primary textual content of the post. |
+| `created_at` | integer | Unix timestamp of when the record was created. |
+| `updated_at` | integer | Unix timestamp of the last update. |
+| `deleted_at` | integer | Soft-delete timestamp (null if not deleted). |
+
+### `postcards` table
+
+Stores analysis results, scores, pipeline logs, and processing state for each forensic trace.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | text (PK) | Unique identifier for the postcard. |
+| `post_id` | text (FK) | Reference to the associated `posts` record. |
+| `url` | text | The URL that was analyzed. |
+| `platform` | text | Detected platform for this analysis. |
+| `postcard_score` | real | The overall weighted credibility score (0–1). |
+| `origin_score` | real | Score from the origin reachability audit. |
+| `corroboration_score` | real | Score from corroboration against trusted sources. |
+| `bias_score` | real | Score from the bias analysis stage. |
+| `temporal_score` | real | Score from the temporal alignment check. |
+| `verdict` | text | Human-readable credibility verdict. |
+| `summary` | text | AI-generated summary of the forensic findings. |
+| `confidence_score` | real | Confidence level of the overall analysis. |
+| `primary_sources` | text | JSON-encoded list of primary sources found. |
+| `queries_executed` | text | JSON-encoded list of search queries the agent ran. |
+| `corroboration_log` | text | Full log of the corroboration agent's tool calls. |
+| `audit_log` | text | Full log of the origin audit stage. |
+| `hits` | integer | Number of times this postcard has been retrieved from cache. |
+| `status` | text | Current pipeline status: `pending`, `processing`, `completed`, or `failed`. |
+| `progress` | real | Pipeline progress as a value from 0 to 1. |
+| `stage` | text | Current pipeline stage key (e.g. `scraping`, `auditing`). |
+| `message` | text | Human-readable status message for the current stage. |
+| `error` | text | Error message if the pipeline failed. |
+| `started_at` | integer | Unix timestamp of when processing began. |
+| `created_at` | integer | Unix timestamp of when the record was created. |
+| `updated_at` | integer | Unix timestamp of the last update. |
+| `deleted_at` | integer | Soft-delete timestamp (null if not deleted). |
+
+## Managing the schema
+
+Use the following scripts to manage the database during development:
+
+```bash
+npm run db:push     # sync schema changes to the database
+npm run db:studio   # open Drizzle Studio at http://local.drizzle.studio
+```
+
+## Cache behavior
+
+Postcard caches analyses at the resolved URL level. Submitting the same URL a second time returns the cached postcard immediately without re-running the pipeline.
+
+To force a fresh analysis, pass `refresh: true` in the `POST /api/postcards` request body:
+
+```json
+{
+  "url": "https://x.com/user/status/123",
+  "userApiKey": "your-gemini-api-key",
+  "refresh": true
+}
+```
+
+The `refresh` parameter is only supported in the POST body. The GET endpoint is read-only and does not support forced re-analysis.
+
+<Note>
+  The `hits` field in the `postcards` table increments each time a cached result is served, giving you visibility into how frequently a particular URL is being analyzed.
+</Note>

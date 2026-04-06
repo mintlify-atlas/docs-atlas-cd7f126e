@@ -1,0 +1,92 @@
+---
+title: "Environment variables"
+description: "All environment variables for configuring your Postcard instance"
+---
+
+Copy `.env.example` to `.env` and set the values below before starting Postcard.
+
+```bash
+cp .env.example .env
+```
+
+## Required
+
+| Variable | Description |
+|---|---|
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini API key used by the forensic pipeline in live mode. Get a free key at [aistudio.google.com/api-keys](https://aistudio.google.com/api-keys). |
+
+## AI configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOOGLE_GENERATIVE_AI_MODEL_ID` | `gemini-2.0-flash` | The Gemini model string used by the forensic agents. Change this to use a different model available in your API account. |
+| `NEXT_PUBLIC_FAKE_PIPELINE` | `true` | Set to `"true"` to use mock data for all forensic stages. No API key or live scraping is required. Set to `"false"` to run the real pipeline. |
+| `NEXT_PUBLIC_FAKE_PIPELINE_DELAY` | — | Artificial delay in milliseconds applied during fake pipeline execution. Useful for simulating realistic loading states during UI development. |
+| `NEXT_PUBLIC_FAKE_PIPELINE_FAIL` | — | Set to `"true"` to simulate a pipeline failure in fake mode. Useful for testing error states and UI recovery flows. |
+
+<Note>
+  `NEXT_PUBLIC_` variables are embedded in the browser bundle at build time. Changing them requires restarting the development server or rebuilding the application.
+</Note>
+
+## Database
+
+| Variable | Description |
+|---|---|
+| `TURSO_DATABASE_URL` | libSQL connection URL for a Turso cloud database (e.g. `libsql://your-database.turso.io`). If omitted, Postcard falls back to a local SQLite file (`local.db`). |
+| `TURSO_AUTH_TOKEN` | Authentication token for the Turso cloud database. Required when `TURSO_DATABASE_URL` is set to a `libsql://` URL. |
+
+See [Database](/self-hosting/database) for setup instructions.
+
+## Pipeline tuning
+
+These variables let you adjust the forensic pipeline's behavior without modifying source code.
+
+| Variable | Default | Description |
+|---|---|---|
+| `POSTCARD_MAX_TOOL_CALLS` | `5` | Maximum number of AI tool calls the corroboration agent can make per analysis. Lower values reduce API usage and speed up analysis; higher values allow deeper corroboration. |
+| `POSTCARD_MAX_SOURCES` | `10` | Maximum number of sources the corroboration agent collects during a single trace. |
+| `POSTCARD_WEIGHT_ORIGIN` | `0.3` | Weight applied to the origin score when calculating the overall Postcard Score. |
+| `POSTCARD_WEIGHT_CORROBORATION` | `0.25` | Weight applied to the corroboration score. |
+| `POSTCARD_WEIGHT_BIAS` | `0.25` | Weight applied to the bias score. |
+| `POSTCARD_WEIGHT_TEMPORAL` | `0.2` | Weight applied to the temporal alignment score. |
+
+<Note>
+  The four scoring weights (`POSTCARD_WEIGHT_ORIGIN`, `POSTCARD_WEIGHT_CORROBORATION`, `POSTCARD_WEIGHT_BIAS`, `POSTCARD_WEIGHT_TEMPORAL`) must sum to exactly `1.0`. The default values add up to `1.0` (0.3 + 0.25 + 0.25 + 0.2). Deviating from this will skew the Postcard Score calculation.
+</Note>
+
+## Social media API keys (optional)
+
+These keys improve ingestion accuracy for specific platforms. If omitted, Postcard falls back to Jina Reader for best-effort ingestion.
+
+### Reddit
+
+| Variable | Description |
+|---|---|
+| `REDDIT_CLIENT_ID` | Client ID from your Reddit script app. |
+| `REDDIT_CLIENT_SECRET` | Client secret from your Reddit script app. |
+| `REDDIT_USERNAME` | Reddit account username used for authentication. |
+| `REDDIT_PASSWORD` | Reddit account password used for authentication. |
+
+### X / Twitter
+
+| Variable | Description |
+|---|---|
+| `TWITTER_BEARER_TOKEN` | Bearer token from the Twitter API v2 developer portal. Defined in `.env.example` for future use; the current X ingestion client uses the public oEmbed API and does not require this token. |
+
+### Instagram
+
+| Variable | Description |
+|---|---|
+| `INSTAGRAM_ACCESS_TOKEN` | Access token from your [Meta for Developers](https://developers.facebook.com/) app. Required for high-fidelity Instagram results. |
+
+### TikTok
+
+| Variable | Description |
+|---|---|
+| `TIKTOK_ACCESS_TOKEN` | TikTok API access token. Optional — Postcard uses oEmbed as a fallback. |
+
+## Base URL
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_APP_URL` | The public URL of your deployed Postcard instance (e.g. `https://postcard.example.com`). Used for metadata resolution and OG image generation. If omitted, Postcard falls back to the `VERCEL_URL` environment variable, then `http://localhost:3000`. |

@@ -1,0 +1,114 @@
+---
+title: "Setup"
+description: "Clone, install, and run Postcard locally"
+---
+
+Run your own instance of Postcard for development, testing, or self-hosted forensic analysis.
+
+## Prerequisites
+
+Before you begin, make sure you have the following:
+
+- **Node.js** (v20 or higher recommended)
+- **npm** (bundled with Node.js)
+- **Google Gemini API key** — a free tier key from [Google AI Studio](https://aistudio.google.com/api-keys) is sufficient for local development
+
+<Note>
+  If you don't have a Gemini API key yet, you can still run Postcard in [fake mode](#fake-mode) using mock data — no key required.
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Postcard repository from GitHub and enter the project directory:
+
+    ```bash
+    git clone https://github.com/postcardhq/postcard.git
+    cd postcard
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all Node.js dependencies:
+
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Install Playwright browsers">
+    Postcard requires specifically configured browser binaries for forensic scraping. Install them with:
+
+    ```bash
+    npx playwright install
+    ```
+
+    <Info>
+      Playwright is used by the automated test suite (`npm run test`) to run end-to-end tests of the forensic pipeline and UI flows.
+    </Info>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the environment template to create your local `.env` file:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` and set your Gemini API key for live pipeline mode:
+
+    ```bash
+    GOOGLE_GENERATIVE_AI_API_KEY=your_key_here
+    ```
+
+    See [Environment variables](/self-hosting/environment-variables) for a full reference of all available options.
+  </Step>
+
+  <Step title="Initialize the database">
+    Sync the schema to your local SQLite file:
+
+    ```bash
+    npm run db:push
+    ```
+
+    This creates a `local.db` file in the project root. No external database service is required for local development.
+  </Step>
+
+  <Step title="Start the development server">
+    ```bash
+    npm run dev
+    ```
+
+    Postcard will be available at `http://localhost:3000`.
+  </Step>
+</Steps>
+
+## Fake mode
+
+Set `NEXT_PUBLIC_FAKE_PIPELINE=true` in your `.env` to run the full UI without a real Gemini API key or live scraping. All forensic stages return mock data instantly.
+
+```bash
+NEXT_PUBLIC_FAKE_PIPELINE=true
+```
+
+This is the default value in `.env.example` and is useful for rapid UI development or demos. To simulate a processing delay or failure, use the related variables:
+
+```bash
+NEXT_PUBLIC_FAKE_PIPELINE_DELAY=2000   # artificial delay in milliseconds
+NEXT_PUBLIC_FAKE_PIPELINE_FAIL=true    # simulate a pipeline failure
+```
+
+<Warning>
+  Fake mode returns static mock data and does not perform real forensic analysis. Set `NEXT_PUBLIC_FAKE_PIPELINE=false` and provide a valid `GOOGLE_GENERATIVE_AI_API_KEY` for accurate results.
+</Warning>
+
+## Verification
+
+Run lint and type checks to confirm your environment is configured correctly:
+
+```bash
+npm run check
+```
+
+This runs ESLint across `src`, `app`, and `components`, followed by a TypeScript type check with no emitted output.

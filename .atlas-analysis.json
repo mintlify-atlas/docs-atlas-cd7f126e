@@ -1,0 +1,97 @@
+{
+  "projectType": "saas",
+  "projectName": "Postcard",
+  "projectDescription": "A digital forensics tool that traces viral social media posts back to their definitive source, calculating a Postcard Score to measure content drift from ground truth.",
+  "theme": "luma",
+  "primaryColor": "#1E6B5E",
+  "lightColor": "#E8F5F2",
+  "darkColor": "#0F3D35",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "how-it-works"
+            ]
+          },
+          {
+            "group": "Using Postcard",
+            "pages": [
+              "guides/submitting-a-url",
+              "guides/reading-a-report",
+              "guides/supported-platforms",
+              "guides/api-key-setup"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "self-hosting/setup",
+              "self-hosting/environment-variables",
+              "self-hosting/database",
+              "self-hosting/deployment"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/postcard-score",
+              "concepts/forensic-pipeline",
+              "concepts/ingestion-strategies",
+              "concepts/caching"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/overview",
+              "api-reference/authentication",
+              "api-reference/rate-limits"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api-reference/submit-url",
+              "api-reference/get-postcard",
+              "api-reference/og-image"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "4-stage forensic pipeline: ingest, audit, corroborate, verify",
+    "Postcard Score (0–100%) measuring content drift from ground truth",
+    "AI-powered corroboration engine using Google Gemini with search grounding",
+    "Live content ingestion via platform-specific strategies (X, Reddit, YouTube, Instagram)",
+    "Playwright-based origin reachability and temporal alignment auditing",
+    "Real-time progress polling with SSE-like status updates",
+    "Dynamic Open Graph image generation for forensic report sharing",
+    "Result caching with Turso/libSQL via Drizzle ORM",
+    "Fake mode for development and demos without API keys",
+    "OpenAPI v3.1 specification for SDK generation"
+  ],
+  "publicApiSurface": [
+    "POST /api/postcards — Submit a URL for forensic verification",
+    "GET /api/postcards?url= — Poll for postcard status and retrieve completed report",
+    "GET /api/postcards/[id]/og — Generate dynamic Open Graph PNG image",
+    "processPostcardFromUrl(url, userApiKey, onProgress, refresh, id)",
+    "corroboratePostcard(postcard, markdown, onProgress, userApiKey)",
+    "auditPostcard(url, postcard, userApiKey)",
+    "unifiedPostClient.fetch(url, onProgress)",
+    "PostcardResponseSchema (Zod schema for API responses)",
+    "PostcardScore = 0.3*origin + 0.25*corroboration + 0.25*bias + 0.2*temporal"
+  ]
+}

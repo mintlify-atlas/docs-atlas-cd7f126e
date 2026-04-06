@@ -1,0 +1,109 @@
+---
+title: "Postcard Score"
+description: "How the 0–100% credibility score is calculated from forensic subscores"
+---
+
+The Postcard Score is a weighted percentage (0–100%) that measures how much a piece of content has drifted from its ground truth. A higher score means the content is well-verified; a lower score signals unreliability or active disputes.
+
+The score is computed by combining four forensic subscores, each targeting a distinct axis of credibility, then multiplying by 100 and flooring to an integer for storage.
+
+## The four subscores
+
+<Info>
+**Origin Score (weight: 30%)** — URL reachability. Can the original post be accessed at its claimed source? The verifier agent checks whether the URL is reachable and whether platform-specific signals (hostname, structure) match the declared platform. A clean match scores `1.0`; a mismatch defaults to `0.5`.
+</Info>
+
+<Info>
+**Corroboration Score (weight: 25%)** — AI confidence. This is the `confidenceScore` returned by the Gemini-powered corroboration agent after searching trusted domains for independent sources that support or refute the claim. Ranges from `0.0` (no evidence) to `1.0` (strong independent confirmation).
+</Info>
+
+<Info>
+**Bias Score (weight: 25%)** — Source ratio. Calculated as the ratio of supporting sources to total sources found: `supportingSources / totalSources`. When no sources are found, the score defaults to `0.5` (neutral) to avoid penalizing posts that are simply too niche to index.
+</Info>
+
+<Info>
+**Temporal Score (weight: 20%)** — Timestamp alignment. Does the post's publication date match the narrative it belongs to? The verifier agent checks timestamp coherence against search results. The current implementation defaults to `0.8` when no strong temporal contradiction is detected.
+</Info>
+
+## Weighted formula
+
+The exact formula from `src/lib/postcard.ts`:
+
+```typescript
+const rawScore =
+  audit.originScore * SCORING_WEIGHTS.ORIGIN +
+  corroborationScore * SCORING_WEIGHTS.CORROBORATION +
+  biasScore * SCORING_WEIGHTS.BIAS +
+  audit.temporalScore * SCORING_WEIGHTS.TEMPORAL;
+
+const postcardScore = Math.floor(rawScore * 100);
+```
+
+Where `SCORING_WEIGHTS` is defined in `src/lib/config.ts`:
+
+```typescript
+export const SCORING_WEIGHTS = {
+  ORIGIN: parseFloat(process.env.POSTCARD_WEIGHT_ORIGIN || "0.3"),
+  CORROBORATION: parseFloat(process.env.POSTCARD_WEIGHT_CORROBORATION || "0.25"),
+  BIAS: parseFloat(process.env.POSTCARD_WEIGHT_BIAS || "0.25"),
+  TEMPORAL: parseFloat(process.env.POSTCARD_WEIGHT_TEMPORAL || "0.2"),
+};
+```
+
+<Warning>
+The four weights must sum to exactly `1.0`. If you customize them via environment variables, verify they add up: `ORIGIN + CORROBORATION + BIAS + TEMPORAL = 1.0`. Misconfigured weights will silently produce scores outside the expected range.
+</Warning>
+
+## Score interpretation
+
+| Range | Verdict | Meaning |
+|-------|---------|---------|
+| 80–100 | `verified` | Multiple trusted sources confirm the core claims. Strong forensic signal. |
+| 50–79 | `inconclusive` | Some related sources found, but insufficient evidence to confirm or deny. |
+| 1–49 | `disputed` | Evidence is mixed, or trusted sources actively contradict the claims. |
+| 0 | `insufficient_data` | No meaningful sources found. Pipeline may have been blocked by a login wall or rate limit. |
+
+## Verdict states
+
+The verdict is determined independently by the corroboration agent and stored alongside the numeric score. The four possible values are:
+
+- **`verified`** — Multiple trusted sources confirm the core claims.
+- **`disputed`** — Evidence is mixed, or trusted sources contradict the claims.
+- **`inconclusive`** — Insufficient evidence to determine truthfulness, but some related sources were found.
+- **`insufficient_data`** — No meaningful sources found to evaluate the content.
+
+## How the score is stored
+
+The database stores `postcardScore` as a `real` column (0–100 integer range) in the `postcards` table:
+
+```typescript
+// src/db/schema.ts
+postcardScore: real("postcard_score").notNull(),
+```
+
+The API response divides it back by 100 to return a `0.0–1.0` float:
+
+```typescript
+// src/lib/postcard.ts
+postcardScore: finalRow.postcardScore / 100,
+```
+
+So a stored value of `85` becomes `0.85` in the API response.
+
+## Configuring weights
+
+Override the default weights with environment variables. All four must be set together if you change any of them.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POSTCARD_WEIGHT_ORIGIN` | `0.3` | Weight for URL reachability score |
+| `POSTCARD_WEIGHT_CORROBORATION` | `0.25` | Weight for AI corroboration confidence |
+| `POSTCARD_WEIGHT_BIAS` | `0.25` | Weight for supporting/total source ratio |
+| `POSTCARD_WEIGHT_TEMPORAL` | `0.2` | Weight for timestamp alignment score |
+
+```bash
+POSTCARD_WEIGHT_ORIGIN=0.4
+POSTCARD_WEIGHT_CORROBORATION=0.2
+POSTCARD_WEIGHT_BIAS=0.2
+POSTCARD_WEIGHT_TEMPORAL=0.2
+```

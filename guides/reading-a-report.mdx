@@ -1,0 +1,102 @@
+---
+title: "Reading a forensic report"
+description: "How to interpret the Postcard Score, verdict, and subscore breakdown"
+---
+
+After a forensic analysis completes, Postcard displays a report broken down into a headline score, a verdict, four subscores, a primary sources list, and two audit logs.
+
+## The Postcard Score
+
+The **Postcard Score** is a single number from 0–100% that measures how much a post's content has drifted from the ground truth. Higher is more credible.
+
+The score is a weighted combination of four subscores:
+
+| Weight | Subscore |
+|--------|----------|
+| 30% | Origin Score |
+| 25% | Corroboration Score |
+| 25% | Bias Score |
+| 20% | Temporal Score |
+
+Score ranges to guide interpretation:
+
+| Range | Indication |
+|-------|------------|
+| 75–100% | Strong corroboration from trusted sources; origin verified |
+| 50–74% | Partial corroboration or minor inconsistencies |
+| 25–49% | Mixed or refuting evidence found; treat with caution |
+| 0–24% | Disputed, unverifiable, or access-blocked content |
+
+## Verdict
+
+The verdict is determined by the corroboration agent after analysing search results from trusted domains. There are four possible states:
+
+| Verdict | Meaning |
+|---------|---------|
+| `verified` | Multiple trusted sources confirm the core claims in the post |
+| `disputed` | Evidence is mixed, or trusted sources directly contradict the claims |
+| `inconclusive` | Some related sources were found but are insufficient to confirm or deny |
+| `insufficient_data` | No meaningful sources were found, or the platform blocked access |
+
+## Subscore breakdown
+
+### Origin Score
+
+Measures whether the post is reachable at its claimed origin URL and whether that URL matches the expected platform. A score of `1.0` means the origin check passed cleanly; `0.5` indicates partial or ambiguous results.
+
+### Corroboration Score
+
+The confidence score returned by the corroboration agent (0–1). It reflects how strongly the search results from trusted domains support or refute the post's claims. A high corroboration score means the agent found multiple credible sources that align with the content.
+
+### Bias Score
+
+Calculated from the ratio of supporting to total primary sources found:
+
+```
+biasScore = supportingSources / totalSources
+```
+
+If no sources were found, the bias score defaults to `0.5` (neutral). A low bias score indicates that most sources found were refuting rather than supporting the claims.
+
+### Temporal Score
+
+Measures whether the post's timestamp is consistent with what the auditor found in search results. A high temporal score means the reported date aligns with when related content appeared in the public record.
+
+## Primary sources
+
+The **Primary sources** section lists the individual articles and pages found by the corroboration agent. Each source is classified as:
+
+- **Supporting** — the source confirms or aligns with the post's claims
+- **Refuting** — the source directly contradicts or debunks the claims
+- **Neutral** — the source is related but neither confirms nor denies
+
+Sources are drawn from a curated list of trusted domains including major news outlets (Reuters, AP, NYT, BBC, Guardian) and dedicated fact-checkers (Snopes, PolitiFact, FactCheck.org, FullFact).
+
+## Corroboration log
+
+The **Corroboration log** records every step the corroboration agent took: the search queries it executed, how many results each query returned, and the final verdict decision. Use this log to understand _why_ the agent reached its conclusion and which queries produced results.
+
+## Audit log
+
+The **Audit log** records the results of the origin and temporal checks performed by the forensic auditor. It shows whether the source URL was reachable, how the platform signal was interpreted, and the raw text response from the auditing agent.
+
+## Sharing a report
+
+Every completed report has a stable shareable link:
+
+```
+https://postcard.fartlabs.org/postcards?url=<encoded-url>
+```
+
+Postcard generates a dynamic **Open Graph image** for each completed report, so the link unfurls with a forensic summary card — including the Postcard Score, verdict, and post details — when shared on Discord, X, or any OG-aware platform.
+
+## Insufficient data
+
+A report shows `insufficient_data` when the pipeline could not retrieve enough content to run an analysis. Common causes:
+
+- The platform requires a login to view the post (Instagram, some X content)
+- A Cloudflare or bot-protection page was returned instead of post content
+- The scraped content was fewer than 50 characters
+- The platform URL was not recognised
+
+In these cases the Postcard Score is `0%` and no API credits are consumed for corroboration or auditing.

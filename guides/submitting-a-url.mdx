@@ -1,0 +1,123 @@
+---
+title: "Submitting a URL"
+description: "How to submit a social media post URL for forensic verification"
+---
+
+Postcard accepts a direct post URL and runs a four-stage forensic pipeline to produce a credibility report. You can submit a URL two ways: through the web UI or the REST API.
+
+## Via the web UI
+
+<Steps>
+  <Step title="Open Postcard">
+    Navigate to [postcard.fartlabs.org](https://postcard.fartlabs.org). The home page displays a URL input field.
+  </Step>
+  <Step title="Paste the post URL">
+    Paste the full URL of the social media post you want to verify — for example, `https://x.com/user/status/123`.
+  </Step>
+  <Step title="Submit">
+    Press **Enter** or click the submit button. Postcard redirects you to `/postcards?url=<encoded-url>` and the forensic pipeline starts automatically, provided your API key is configured.
+  </Step>
+  <Step title="Wait for the report">
+    The UI polls for status every 3 seconds and displays live progress messages — scraping, corroborating, auditing, and scoring — until the report is ready.
+  </Step>
+</Steps>
+
+<Note>
+  The pipeline requires a Google Gemini API key to start a **new** analysis. If you haven't set one up yet, see [API key setup](/guides/api-key-setup).
+</Note>
+
+## Via the REST API
+
+Use the REST API to integrate Postcard into your own tools or pipelines.
+
+### 1. Submit the URL
+
+Send a `POST` request to `/api/postcards` with the post URL in the JSON body:
+
+```bash
+curl -s -X POST "https://postcard.fartlabs.org/api/postcards" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://x.com/user/status/123" }'
+```
+
+The endpoint returns HTTP 202 Accepted immediately with an analysis `id`:
+
+```json
+{
+  "id": "abc-123",
+  "status": "processing",
+  "message": "Forensic trace initialized."
+}
+```
+
+### 2. Poll for results
+
+Use the original URL to poll `GET /api/postcards?url=...` for status updates:
+
+```bash
+# Poll for completion
+while true; do
+  RESPONSE=$(curl -s "https://postcard.fartlabs.org/api/postcards?url=https://x.com/user/status/123")
+  STATUS=$(echo "$RESPONSE" | jq -r '.status')
+
+  if [ "$STATUS" = "completed" ]; then
+    echo "$RESPONSE" | jq '.postcard'
+    break
+  elif [ "$STATUS" = "failed" ]; then
+    echo "Error: $(echo '$RESPONSE' | jq -r '.error')"
+    break
+  fi
+
+  echo "Progress: $(echo '$RESPONSE' | jq -r '.progress // 0')"
+  sleep 3
+done
+```
+
+While processing, the response includes a `stage`, `message`, and `progress` (0–1):
+
+```json
+{
+  "status": "processing",
+  "stage": "corroborating",
+  "message": "Searching for primary sources...",
+  "progress": 0.4
+}
+```
+
+When complete, the full forensic report is included in the response body.
+
+## Forcing re-analysis with `refresh`
+
+By default, Postcard serves a cached result if the URL has been analysed before — no API key required. To force a fresh analysis regardless of the cache, set `refresh: true` in your POST body:
+
+```json
+{
+  "url": "https://x.com/user/status/123",
+  "userApiKey": "your-gemini-api-key",
+  "refresh": true
+}
+```
+
+## Cached results
+
+When a URL has already been analysed, Postcard returns the stored report immediately with no pipeline cost — **no API key needed for cached lookups**.
+
+The GET endpoint (`/api/postcards?url=...`) also serves cached results directly. If no analysis exists for the URL yet, it returns a `404 not_found` response:
+
+```json
+{
+  "status": "not_found",
+  "error": "Analysis not found. Submit this URL via the Postcard UI or the POST endpoint to start a trace."
+}
+```
+
+## Error cases
+
+| Error | Cause |
+|-------|-------|
+| Login or signup wall detected | The platform requires authentication to view the content (common on Instagram and some X posts) |
+| Cloudflare or security check detected | The platform blocked the scraper with a challenge page |
+| Content too short or empty | The page returned insufficient text for analysis |
+| Platform not recognized or supported | The URL resolved to a generic page with no platform signals |
+
+When any of these occur, the pipeline sets the verdict to `insufficient_data` and records the failure reason in the corroboration log. No API credits are consumed.

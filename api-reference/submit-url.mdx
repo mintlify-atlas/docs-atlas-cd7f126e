@@ -1,0 +1,124 @@
+---
+title: "Submit URL for verification"
+description: "POST /api/postcards — Start a forensic analysis for a social media post"
+---
+
+Submits a social media post URL for forensic analysis. The endpoint returns immediately with an analysis `id`; the analysis runs in the background. Poll `GET /api/postcards?url=` for status updates.
+
+**Method and path**
+
+```
+POST https://postcard.fartlabs.org/api/postcards
+```
+
+## Request
+
+### Headers
+
+| Header | Required | Value |
+|--------|----------|-------|
+| `Content-Type` | Yes | `application/json` |
+
+### Body parameters
+
+<ParamField body="url" type="string" required>
+  The full URL of the social media post to verify. Must be a valid URL. Supported platforms include X, Reddit, YouTube, Instagram, Bluesky, Threads, and generic URLs via Jina Reader fallback.
+</ParamField>
+
+<ParamField body="userApiKey" type="string">
+  Your Google Gemini API key. Required if the server is not configured with a server-side key. Get a free key at [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys). See [Authentication](/api-reference/authentication) for details.
+</ParamField>
+
+<ParamField body="refresh" type="boolean" default="false">
+  When `true`, forces a fresh analysis even if a completed result already exists in the cache. Use this to re-analyze a post after a significant time has passed or if the cached result is stale.
+</ParamField>
+
+### Request example
+
+```bash
+curl -X POST "https://postcard.fartlabs.org/api/postcards" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://x.com/user/status/123",
+    "userApiKey": "AIzaSy...",
+    "refresh": false
+  }'
+```
+
+```json
+{
+  "url": "https://x.com/user/status/123",
+  "userApiKey": "AIzaSy...",
+  "refresh": false
+}
+```
+
+## Responses
+
+### 202 Accepted — analysis started
+
+Returned when a new analysis has been created and is running in the background.
+
+<ResponseField name="status" type="string" required>
+  Always `"processing"` for a freshly submitted analysis.
+</ResponseField>
+
+<ResponseField name="id" type="string" required>
+  UUID of the created analysis. Use this as a reference; poll with the original URL via the GET endpoint.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable message confirming the trace was initialized.
+</ResponseField>
+
+```json
+{
+  "status": "processing",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Forensic trace initialized."
+}
+```
+
+### 202 Accepted — cache hit (already processing)
+
+If an analysis for this URL is already in progress, the existing job is returned rather than starting a duplicate.
+
+```json
+{
+  "status": "processing",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "An analysis for this URL is already in progress."
+}
+```
+
+### 200 OK — cache hit (completed)
+
+If a completed analysis already exists and `refresh` is not `true`, the endpoint returns the full report immediately — no polling needed.
+
+```json
+{
+  "status": "completed",
+  "url": "https://x.com/user/status/123",
+  "platform": "X",
+  "postcardScore": 0.875,
+  "markdown": "# Post content...",
+  "timestamp": "2026-04-04T12:00:00.000Z",
+  "id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### 400 Bad Request — invalid input
+
+Returned when the request body is malformed or the `url` field is missing or not a valid URL.
+
+```json
+{
+  "error": "Invalid url"
+}
+```
+
+## Polling for results
+
+After submitting, use the `GET /api/postcards?url=` endpoint to track progress. Poll every 3–5 seconds until `status` is `"completed"` or `"failed"`.
+
+See [Get postcard status](/api-reference/get-postcard) for the full polling reference and response schema.

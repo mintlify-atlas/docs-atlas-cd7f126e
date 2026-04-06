@@ -1,0 +1,53 @@
+---
+title: "Welcome to Postcard"
+description: "Trace every post back to its source. Digital forensics for social media content verification."
+---
+
+Postcard is a digital forensics tool that takes a social media post URL, traces it back to its original source, and produces a **Postcard Score** (0–100%) measuring how much the content has drifted from the ground truth.
+
+> _Trace the Truth._
+
+Screenshots strip context. By the time something goes viral, it's been cropped, captioned, and misattributed. Postcard uses AI-powered corroboration and live site auditing to restore that context and give you a credibility verdict you can trust.
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Verify your first post in under a minute
+  </Card>
+  <Card title="How it works" icon="diagram-project" href="/how-it-works">
+    Understand the 4-stage forensic pipeline
+  </Card>
+  <Card title="API reference" icon="code" href="/api-reference/overview">
+    Integrate Postcard into your own tools
+  </Card>
+  <Card title="Postcard Score" icon="gauge" href="/concepts/postcard-score">
+    Learn how the credibility score is calculated
+  </Card>
+</CardGroup>
+
+## What Postcard does
+
+Postcard runs a four-stage forensic pipeline on any social media post URL:
+
+1. **Ingest** — Fetches live content and metadata from the platform using platform-specific strategies (oEmbed, native APIs, or Jina Reader fallback).
+2. **Audit** — Verifies the post is reachable at its claimed origin using Gemini with Google Search, and checks that timestamps are consistent with the reported narrative.
+3. **Corroborate** — Searches trusted news and fact-checking domains with Google Gemini to find independent sources that support or refute the content.
+4. **Score** — Combines origin reachability, corroboration confidence, bias analysis, and temporal alignment into a single weighted Postcard Score.
+
+## Supported platforms
+
+Postcard supports direct forensic verification for posts on X (Twitter), Reddit, YouTube, Instagram, Bluesky, and Threads — with generic fallback support for any public URL via Jina Reader.
+
+<CardGroup cols={2}>
+  <Card title="Submitting a URL" icon="link" href="/guides/submitting-a-url">
+    How to start a forensic trace
+  </Card>
+  <Card title="Reading a report" icon="file-magnifying-glass" href="/guides/reading-a-report">
+    Understand the verdict and subscores
+  </Card>
+  <Card title="Supported platforms" icon="globe" href="/guides/supported-platforms">
+    Platform coverage and limitations
+  </Card>
+  <Card title="API key setup" icon="key" href="/guides/api-key-setup">
+    Configure your Gemini API key
+  </Card>
+</CardGroup>

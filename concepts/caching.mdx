@@ -1,0 +1,165 @@
+---
+title: "Caching"
+description: "How Postcard caches forensic results to avoid redundant analysis"
+---
+
+Postcard caches forensic results at the database level using Drizzle ORM. Once a URL has been analyzed, subsequent requests for the same URL return the stored result instantly — no Gemini API calls, no scraping, no pipeline execution.
+
+<Info>
+Caching is particularly valuable for viral content. A post that is being shared thousands of times will generate many simultaneous Postcard requests. After the first analysis completes, every subsequent lookup is served from the cache in milliseconds.
+</Info>
+
+## Cache key
+
+The cache key is the **normalized post URL** — the URL after stripping query parameters and canonicalizing via `normalizePostUrl()`. This means `https://x.com/user/status/123?s=20&t=abc` and `https://x.com/user/status/123` resolve to the same cache entry.
+
+The normalized URL is stored in the `posts` table and used for all lookups:
+
+```typescript
+export async function getOrCreatePostByUrl(url: string) {
+  const normalized = normalizePostUrl(url);
+
+  const existing = await db
+    .select()
+    .from(posts)
+    .where(eq(posts.url, normalized))
+    .limit(1);
+
+  if (existing.length > 0) {
+    return existing[0];
+  }
+  // ... create new post row
+}
+```
+
+## Cache hit flow
+
+When a completed result exists for the normalized URL and `refresh` is not requested:
+
+1. The pipeline queries the `postcards` and `posts` tables for the normalized URL.
+2. A completed row is found.
+3. The result is returned immediately — no API key needed.
+4. The `hits` counter on the `postcards` row is incremented.
+
+```typescript
+// From src/lib/postcard.ts
+const cachedResult = await db
+  .select()
+  .from(postcards)
+  .innerJoin(posts, eq(posts.url, normalizedUrl))
+  .orderBy(sql`${postcards.createdAt} DESC`)
+  .limit(1);
+
+if (cachedResult.length > 0) {
+  const { postcards: row, posts: post } = cachedResult[0];
+  // Return cached result, score divided by 100 for API response
+  return PostcardResponseSchema.parse({
+    url: normalizedUrl,
+    postcardScore: row.postcardScore / 100,
+    // ...
+  });
+}
+```
+
+## Cache miss flow
+
+When no completed result exists for the URL:
+
+1. A fresh `postcards` row is created with `status: "processing"`.
+2. The full four-stage pipeline runs (scrape → corroborate → audit → score).
+3. Results are written to the `postcards` and `posts` tables.
+4. The row's `status` is set to `"completed"`.
+
+A valid API key (`userApiKey`) is required to initiate a fresh analysis. Cache hits do not require an API key.
+
+## The hits counter
+
+<Note>
+Every time a cached result is served, Postcard increments the `hits` column on the `postcards` row using an atomic SQL expression. This counter is a signal of how many times a forensic report has been accessed after its initial analysis.
+</Note>
+
+```typescript
+export async function incrementPostcardHits(id: string) {
+  await db
+    .update(postcards)
+    .set({ hits: sql`${postcards.hits} + 1` })
+    .where(eq(postcards.id, id));
+}
+```
+
+The `hits` column is defined in `src/db/schema.ts` as an integer, defaulting to `0`:
+
+```typescript
+hits: integer("hits").notNull().default(0),
+```
+
+## Cache duration
+
+There is no TTL (time-to-live). Cached results persist indefinitely until a forced refresh is requested. This is a deliberate design choice: forensic results are point-in-time records. The score reflects the state of the internet at the moment of analysis.
+
+## Force refresh
+
+To re-run the full pipeline and overwrite a cached result, pass `refresh: true`. This bypasses the cache check and runs a fresh analysis regardless of whether a completed result exists.
+
+**Via POST body:**
+
+```json
+{
+  "url": "https://x.com/user/status/123",
+  "userApiKey": "your-gemini-api-key",
+  "refresh": true
+}
+```
+
+**Via GET query parameter (SSR page):**
+
+```
+/postcards?url=https://x.com/user/status/123&refresh=true
+```
+
+A valid API key is always required when `refresh: true` is set, even if a cached result exists.
+
+## Concurrent request deduplication
+
+If a pipeline is already running (`status: "processing"`) for a given URL, new requests attach to the existing pipeline rather than starting a second one. The system queries for an in-flight row first:
+
+```typescript
+export async function getExistingProcessingPostcard(url: string) {
+  const normalized = normalizePostUrl(url);
+  const result = await db
+    .select()
+    .from(postcards)
+    .innerJoin(posts, eq(posts.id, postcards.postId))
+    .where(and(eq(posts.url, normalized), eq(postcards.status, "processing")))
+    .orderBy(sql`${postcards.createdAt} DESC`)
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+```
+
+If a processing row is found, the new request returns the existing row's ID and the client polls it like normal. This prevents duplicate Gemini API calls for simultaneous requests to the same URL.
+
+## Database-level caching vs. HTTP caching
+
+Postcard caches at the **database level**, not at the HTTP layer. There are no `Cache-Control` headers or CDN edge caches involved. The cache lives entirely in the SQLite database (`local.db` by default).
+
+| Property | Database cache (Postcard) |
+|----------|--------------------------|
+| Storage | SQLite via Drizzle ORM |
+| Granularity | Per normalized URL |
+| TTL | None (indefinite) |
+| Invalidation | `refresh: true` parameter |
+| Shared across instances | Only if using Turso cloud |
+
+## Self-hosting considerations
+
+The default database is a local SQLite file (`local.db`). This means the cache is local to a single server instance. If you run multiple instances behind a load balancer, each instance maintains its own cache — a request that hits instance A won't benefit from an analysis already completed on instance B.
+
+To share the cache across instances, configure Turso cloud:
+
+```bash
+TURSO_DATABASE_URL=libsql://your-database.turso.io
+TURSO_AUTH_TOKEN=your-auth-token
+```
+
+With Turso, all instances share the same SQLite-compatible database over the libSQL protocol, and a cache hit on any instance is a cache hit everywhere.

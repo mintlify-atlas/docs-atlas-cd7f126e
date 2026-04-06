@@ -1,0 +1,83 @@
+---
+title: "Open Graph image"
+description: "GET /api/postcards/[id]/og — Generate a dynamic social card image for a completed analysis"
+---
+
+Generates a dynamic Open Graph image for a completed forensic analysis. The endpoint returns a `1200×630` PNG suitable for social media unfurling on platforms like Discord, X, and Slack.
+
+**Method and path**
+
+```
+GET https://postcard.fartlabs.org/api/postcards/{id}/og
+```
+
+## Request
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  The UUID of a completed postcard analysis. Obtain this from:
+  - The `id` field in the `POST /api/postcards` response
+  - The `id` field in the completed `GET /api/postcards?url=` response
+</ParamField>
+
+## Response
+
+The endpoint returns a PNG image, not JSON.
+
+| Header | Value |
+|--------|-------|
+| `Content-Type` | `image/png` |
+| Dimensions | 1200 × 630 px |
+
+<Note>
+  The OG image is only generated for **completed** analyses. Requesting an image for an analysis that is still processing, failed, or does not exist will return an error. Always verify that the analysis `status` is `"completed"` before linking to this endpoint.
+</Note>
+
+## Visual contents
+
+The generated image uses a vintage "Forensic Report" aesthetic and includes:
+
+- The platform and post metadata
+- The verdict from the corroboration pass
+- A dynamic score stamp whose color reflects the credibility result
+- The Postcard branding
+
+The stamp color adapts to the analysis outcome, giving viewers an at-a-glance signal of credibility before they click through.
+
+## Usage
+
+### Automatic unfurling
+
+The `/postcards?url=` report page automatically sets this endpoint as the `og:image` meta tag:
+
+```html
+<meta property="og:image" content="https://postcard.fartlabs.org/api/postcards/{id}/og" />
+```
+
+When you share a Postcard report link on Discord, X, Slack, or any Open Graph-aware platform, the forensic report card unfurls automatically — no extra configuration needed.
+
+### Manual embedding
+
+You can also reference the image directly in your own pages, emails, or social posts:
+
+```bash
+curl -o report.png \
+  "https://postcard.fartlabs.org/api/postcards/550e8400-e29b-41d4-a716-446655440000/og"
+```
+
+```html
+<img
+  src="https://postcard.fartlabs.org/api/postcards/550e8400-e29b-41d4-a716-446655440000/og"
+  alt="Postcard forensic report for x.com/user/status/123"
+  width="1200"
+  height="630"
+/>
+```
+
+## Getting the analysis ID
+
+The `id` for a completed analysis is available in two places:
+
+1. **From `POST /api/postcards`** — the `id` field in the `202` response body.
+2. **From `GET /api/postcards?url=`** — the `id` field in the completed (`status: "completed"`) response body.

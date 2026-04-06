@@ -1,0 +1,61 @@
+---
+title: "API key setup"
+description: "Configure your Google Gemini API key to start forensic analyses"
+---
+
+Postcard uses Google Gemini to power its corroboration and auditing agents. A Gemini API key is required to start a **new** forensic analysis. Cached results are always served for free — no key needed.
+
+## Get a free Gemini API key
+
+Google AI Studio offers a free Gemini API key with no credit card required.
+
+<Steps>
+  <Step title="Open Google AI Studio">
+    Go to [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) and sign in with your Google account.
+  </Step>
+  <Step title="Create an API key">
+    Click **Create API key** and copy the generated key. Keep it somewhere safe — you won't be able to view it again after closing the dialog.
+  </Step>
+  <Step title="Open Postcard Settings">
+    Navigate to [postcard.fartlabs.org](https://postcard.fartlabs.org) and click **Settings** in the navigation bar.
+  </Step>
+  <Step title="Paste and save your key">
+    Paste your API key into the **Google AI API Key** input field and click **Save Key**. The UI confirms the key is configured.
+  </Step>
+</Steps>
+
+<Note>
+  Your API key is stored in a browser cookie named `postcard_api_key` with a 30-day expiry. When you submit a URL for analysis, the key is included in the POST request body as `userApiKey` and passed to the Postcard server, which then uses it to call the Google Gemini API. The key is not stored server-side — it is only used for the duration of the analysis request.
+</Note>
+
+## How the key is used
+
+When you submit a URL for analysis, your browser reads the `postcard_api_key` cookie value and includes it in the POST request body as `userApiKey`. The Postcard server receives this key and passes it to the Google Gemini SDK when calling the corroboration and auditing agents. If no `userApiKey` is present in the request and no server-side default is configured via `GOOGLE_GENERATIVE_AI_API_KEY`, the pipeline will not start.
+
+## Managing your key
+
+From **Settings** you can:
+
+- **Save Key** — stores a new or updated key in the cookie
+- **Test Key** — sends a test POST request to `/api/postcards` with your stored key to confirm it is accepted
+- **Clear** — removes the cookie from your browser
+
+## Rate limits on the free tier
+
+<Warning>
+  The free Gemini API tier has rate limits. If you hit them, the pipeline will fail with an error from the Gemini API. The Postcard UI displays the failure state with the error message. Wait a short period and retry, or consider upgrading to a paid Gemini tier for higher throughput.
+</Warning>
+
+## For self-hosters: server-side default key
+
+If you are running Postcard yourself, you can set a server-side default Gemini API key via the `GOOGLE_GENERATIVE_AI_API_KEY` environment variable in your `.env` file:
+
+```bash
+GOOGLE_GENERATIVE_AI_API_KEY=your-key-here
+```
+
+When this variable is set, the pipeline uses it as a fallback if no `userApiKey` is provided in the request. This is useful for private deployments where you want all users to share a single key without requiring individual configuration.
+
+<Note>
+  A `userApiKey` supplied in the POST request body always takes precedence over the server-side `GOOGLE_GENERATIVE_AI_API_KEY` environment variable.
+</Note>

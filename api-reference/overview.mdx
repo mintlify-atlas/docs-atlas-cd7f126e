@@ -1,0 +1,75 @@
+---
+title: "API overview"
+description: "The Postcard REST API for programmatic forensic verification"
+---
+
+Postcard provides a public REST API for forensic verification of social media posts. You can submit URLs, poll for analysis progress, and retrieve completed forensic reports programmatically.
+
+## Base URL
+
+```
+https://postcard.fartlabs.org/api/postcards
+```
+
+## Endpoints at a glance
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/postcards` | Submit a URL for forensic analysis |
+| `GET` | `/api/postcards?url=` | Poll for analysis status and retrieve the completed report |
+| `GET` | `/api/postcards/{id}/og` | Generate a dynamic Open Graph image for a completed analysis |
+
+<CardGroup cols={3}>
+  <Card title="Submit URL" icon="paper-plane" href="/api-reference/submit-url">
+    Start a forensic analysis for a social media post.
+  </Card>
+  <Card title="Get postcard status" icon="magnifying-glass" href="/api-reference/get-postcard">
+    Poll for analysis progress and retrieve the completed report.
+  </Card>
+  <Card title="Open Graph image" icon="image" href="/api-reference/og-image">
+    Generate a dynamic social card image for a completed analysis.
+  </Card>
+</CardGroup>
+
+## Async pattern
+
+The API follows an async request/poll pattern:
+
+1. **Submit** — `POST /api/postcards` returns `202 Accepted` immediately with a `postcardId`. The analysis runs in the background.
+2. **Poll** — `GET /api/postcards?url=` returns the current status. Repeat every 3–5 seconds.
+3. **Retrieve** — When `status` equals `"completed"`, the full forensic report is in the response body.
+
+The analysis passes through four status states:
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Analysis queued, not yet started |
+| `processing` | Pipeline actively running |
+| `completed` | Analysis finished; full report available |
+| `failed` | Analysis could not complete; check the `error` field |
+
+## CORS
+
+All endpoints include cross-origin resource sharing headers so you can call the API from browser-based clients:
+
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type, x-api-key
+```
+
+## Content type
+
+Send `Content-Type: application/json` for all `POST` request bodies. Responses are `application/json` unless noted otherwise (the OG image endpoint returns `image/png`).
+
+## OpenAPI spec and interactive reference
+
+The machine-readable OpenAPI 3.1 specification is available at:
+
+```
+https://postcard.fartlabs.org/openapi.json
+```
+
+<Tip>
+  Postcard also provides an interactive API reference powered by [Scalar](https://scalar.com) at [https://postcard.fartlabs.org/api/reference](https://postcard.fartlabs.org/api/reference). You can explore all endpoints, view request/response schemas, and send live requests directly from the browser — no setup required.
+</Tip>

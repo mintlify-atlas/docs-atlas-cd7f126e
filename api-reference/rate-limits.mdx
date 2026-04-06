@@ -1,0 +1,49 @@
+---
+title: "Rate limits"
+description: "Understanding rate limits for the Postcard API"
+---
+
+Postcard enforces rate limits at two levels: the HTTP API layer and the underlying Gemini AI API. Understanding both helps you avoid failed analyses and quota exhaustion.
+
+## API rate limits
+
+| Tier | Limit | Scope |
+|------|-------|-------|
+| Development (default) | 60 requests per minute | Per IP address |
+| Production | Configured via Vercel Edge/Serverless | Per deployment |
+
+Production limits are controlled by your Vercel function configuration. If you are self-hosting, consult the [deployment guide](/self-hosting/deployment) for tuning options.
+
+When the API rate limit is exceeded, the server returns:
+
+```
+HTTP 429 Too Many Requests
+```
+
+<Warning>
+  The Gemini free tier enforces its own quotas independent of Postcard's API limits. The binding constraint for most users is `GenerateRequestsPerMinutePerProjectPerModel`. If this limit is hit during an analysis, the pipeline transitions to a `failed` state with an error message — the HTTP request itself will not return a 429, but the resulting postcard will have `status: "failed"`.
+</Warning>
+
+## Gemini API quota tiers
+
+| Tier | Approximate limit | Notes |
+|------|-------------------|-------|
+| Free (no billing) | 15 RPM, 1,500 RPD | Sufficient for light/demo use |
+| Pay-as-you-go | 1,000+ RPM | Quota scales with billing tier |
+
+These limits are set by Google and may change. Check the [Gemini API documentation](https://ai.google.dev/gemini-api/docs/rate-limits) for current values.
+
+## Per-analysis tool call limit
+
+Each forensic analysis is also bounded by the `POSTCARD_MAX_TOOL_CALLS` configuration (default: `5`). This limits how many search/grounding calls the AI agent makes during a single corroboration pass. Lowering this value reduces Gemini quota consumption per analysis; raising it allows more thorough source discovery at the cost of higher quota usage.
+
+## Strategies to avoid rate limits
+
+<Tip>
+  The `GET /api/postcards?url=` endpoint reads from the database cache and does **not** consume any Gemini quota. If a result already exists, you can retrieve it as many times as needed without touching your API limits.
+</Tip>
+
+- **Use cached results.** Call `GET /api/postcards?url=` before `POST /api/postcards`. If the analysis already exists, you get the full report for free.
+- **Use fake pipeline mode for demos.** Set `NEXT_PUBLIC_FAKE_PIPELINE=true` in your environment to simulate the analysis pipeline without making any real AI calls. Useful for UI development and demos.
+- **Upgrade your Gemini tier.** If you need to run many analyses, add billing to your Google AI Studio project to access higher quotas.
+- **Stagger submissions.** Avoid submitting many URLs simultaneously. Poll existing jobs to completion before submitting new ones.

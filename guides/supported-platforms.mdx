@@ -1,0 +1,82 @@
+---
+title: "Supported platforms"
+description: "Social media platforms supported for forensic verification"
+---
+
+Postcard includes a dedicated ingestion client for each major social platform. When a specialized client fails or is unavailable, the pipeline falls back to Jina Reader for best-effort ingestion.
+
+## Platform support matrix
+
+| Platform | Ingestion method | Data extracted | Key required |
+|----------|-----------------|----------------|--------------|
+| X (Twitter) | Twitter oEmbed API (`publish.twitter.com/oembed`) | Author name, post HTML, author URL | None |
+| Reddit | Reddit `.json` endpoint | Title, body text, author, upvotes, comments, awards, subreddit | None |
+| YouTube | YouTube oEmbed API (`youtube.com/oembed`) | Video title, author, thumbnail URL | None |
+| Instagram | Facebook Graph API oEmbed (`graph.facebook.com/instagram_oembed`) | Author name, post HTML | `INSTAGRAM_ACCESS_TOKEN` required |
+| Bluesky | Jina Reader fallback | Public page markdown | None |
+| Threads | Jina Reader fallback | Public page markdown | None |
+| Generic | Jina Reader (`r.jina.ai`) | Full page markdown | None |
+
+## Per-platform notes
+
+### X (Twitter)
+
+The X client uses the public Twitter oEmbed endpoint, which requires no authentication for public posts. The oEmbed response includes the post HTML, author name, and author URL.
+
+<Warning>
+  Some X posts are behind a login wall, particularly those from accounts that have set their posts to restricted visibility. When this occurs, the pipeline falls back to Jina Reader. If Jina also hits an authentication page, the analysis returns `insufficient_data`.
+</Warning>
+
+### Reddit
+
+The Reddit client appends `.json` to any Reddit post URL and parses the native Reddit API response. This works without credentials for public subreddits. Providing Reddit credentials via environment variables enables authenticated API access, which improves reliability for rate-limited or restricted subreddits.
+
+### YouTube
+
+The YouTube client uses the public YouTube oEmbed endpoint for video URLs. YouTube Community Posts (`/community` or `/channel/` URLs) are not supported by the oEmbed API and trigger an automatic fallback to Jina Reader.
+
+### Instagram
+
+The Instagram client requires an `INSTAGRAM_ACCESS_TOKEN` from the [Meta for Developers](https://developers.facebook.com/) platform. If the token is not set, the `InstagramPostClient` will not handle Instagram URLs and the pipeline falls back to Jina Reader directly.
+
+<Warning>
+  Instagram aggressively blocks unauthenticated scrapers. Without a valid `INSTAGRAM_ACCESS_TOKEN`, Jina Reader will typically encounter a login wall, and the analysis will return `insufficient_data`.
+</Warning>
+
+### Bluesky and Threads
+
+Bluesky and Threads do not have dedicated ingestion clients. Both platforms are handled by the Jina Reader fallback, which fetches the public page and converts it to markdown.
+
+### Generic (any public URL)
+
+Any URL that does not match a recognized platform hostname is handled by the `JinaPostClient`, which fetches content via `https://r.jina.ai/<encoded-url>` and returns it as markdown with the platform set to `Other`.
+
+## The fallback chain
+
+Every submission passes through `UnifiedPostStrategy`, which selects the first client whose `canHandle()` check matches the URL hostname. If that client throws an error (for example, an HTTP 403 or an oEmbed failure), the strategy automatically retries with Jina Reader:
+
+```
+URL submitted
+  └─ Strategy detection
+       ├─ Recognized platform → Specialized client
+       │    └─ On failure (403, 404, rate limit) → Jina Reader
+       └─ Unknown platform → Jina Reader directly
+```
+
+<Note>
+  Jina Reader is the final fallback and handles all URLs. If Jina Reader also fails, the pipeline records the error and returns `insufficient_data`.
+</Note>
+
+## Improving ingestion reliability
+
+Providing optional platform API keys in your environment improves success rates on platforms that restrict anonymous scrapers:
+
+| Environment variable | Platform | Effect |
+|---------------------|----------|--------|
+| `INSTAGRAM_ACCESS_TOKEN` | Instagram | Enables the Instagram oEmbed client. Without it, Instagram URLs fall directly to Jina Reader. Get from [Meta for Developers](https://developers.facebook.com/). |
+| `REDDIT_CLIENT_ID` | Reddit | Enables authenticated Reddit API access for restricted subreddits. Get from [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps). |
+| `REDDIT_CLIENT_SECRET` | Reddit | Required alongside `REDDIT_CLIENT_ID`. |
+| `REDDIT_USERNAME` | Reddit | Reddit account username for authenticated access. |
+| `REDDIT_PASSWORD` | Reddit | Reddit account password for authenticated access. |
+
+If any of these keys are absent, Postcard falls back to Jina Reader gracefully — no configuration error is thrown. X and YouTube do not require any credentials.

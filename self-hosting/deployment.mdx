@@ -1,0 +1,92 @@
+---
+title: "Deployment"
+description: "Deploy Postcard to production with Vercel"
+---
+
+Postcard is built for [Vercel](https://vercel.com) and uses `@vercel/functions` for serverless background processing. Vercel is the recommended deployment target.
+
+<Note>
+  Postcard uses the Vercel AI SDK's `waitUntil` pattern to run the forensic pipeline as a background task after returning an immediate `202 Accepted` response to the client. This allows long-running AI analysis to complete without blocking the HTTP response or hitting serverless function timeout limits.
+</Note>
+
+## Deploy to Vercel
+
+<Steps>
+  <Step title="Fork or clone the repository">
+    Fork [postcardhq/postcard](https://github.com/postcardhq/postcard) on GitHub, or push your own clone to a GitHub, GitLab, or Bitbucket repository.
+  </Step>
+
+  <Step title="Connect to Vercel">
+    Go to [vercel.com/new](https://vercel.com/new) and import your repository. Vercel automatically detects the Next.js framework and configures the build settings.
+  </Step>
+
+  <Step title="Add environment variables">
+    In the Vercel project settings under **Environment Variables**, add the following:
+
+    **Required:**
+
+    | Variable | Value |
+    |---|---|
+    | `GOOGLE_GENERATIVE_AI_API_KEY` | Your Gemini API key from [Google AI Studio](https://aistudio.google.com/api-keys) |
+    | `NEXT_PUBLIC_FAKE_PIPELINE` | `false` |
+
+    **Recommended for production:**
+
+    | Variable | Value |
+    |---|---|
+    | `TURSO_DATABASE_URL` | Your Turso database URL (e.g. `libsql://your-database.turso.io`) |
+    | `TURSO_AUTH_TOKEN` | Your Turso auth token |
+    | `NEXT_PUBLIC_APP_URL` | Your deployment URL (e.g. `https://postcard.example.com`) |
+
+    See [Environment variables](/self-hosting/environment-variables) for the full list of options, including social media API keys for improved platform ingestion.
+
+    <Note>
+      If you omit `TURSO_DATABASE_URL`, Vercel will use an in-memory SQLite instance that does not persist data between deployments. Set up a [Turso cloud database](/self-hosting/database#turso-cloud-setup) for persistent storage.
+    </Note>
+  </Step>
+
+  <Step title="Deploy">
+    Click **Deploy**. Vercel runs `next build` and deploys the application. Subsequent pushes to your main branch trigger automatic redeployments.
+  </Step>
+</Steps>
+
+## API reference endpoint
+
+The `/api/reference` endpoint is powered by [Scalar](https://scalar.com/) and serves an interactive API reference in both development and production. Visit `/api/reference` on your deployed instance to explore and test the Postcard API directly from the browser.
+
+The underlying OpenAPI specification is available at `/openapi.json`.
+
+## CORS
+
+The Postcard API allows requests from all origins by default. Responses include the following headers:
+
+```
+Content-Type: application/json
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Origin: *
+```
+
+No additional CORS configuration is required for cross-origin API access.
+
+## Using fake mode for demos
+
+For public demos or presentations where API quota reliability matters, you can deploy with fake mode enabled:
+
+```bash
+NEXT_PUBLIC_FAKE_PIPELINE=true
+```
+
+This guarantees 100% responsiveness without consuming Gemini API credits or making live network requests.
+
+<Warning>
+  Do not use `NEXT_PUBLIC_FAKE_PIPELINE=true` in a production instance where real forensic analysis is required. Fake mode returns static mock data and does not perform any actual source tracing or credibility scoring.
+</Warning>
+
+## Production checklist
+
+Before going live, confirm the following:
+
+- `NEXT_PUBLIC_FAKE_PIPELINE` is set to `false`
+- `GOOGLE_GENERATIVE_AI_API_KEY` is set to a valid, active key
+- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are configured for persistent storage
+- `NEXT_PUBLIC_APP_URL` is set to your canonical deployment URL for correct OG image and metadata resolution

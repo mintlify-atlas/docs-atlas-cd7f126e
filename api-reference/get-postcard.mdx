@@ -1,0 +1,298 @@
+---
+title: "Get postcard status"
+description: "GET /api/postcards — Poll for forensic analysis status and retrieve the completed report"
+---
+
+Returns the current analysis state for a submitted URL. Use this endpoint to poll for progress after calling `POST /api/postcards`, and to retrieve the full forensic report once analysis completes.
+
+**Method and path**
+
+```
+GET https://postcard.fartlabs.org/api/postcards?url={url}
+```
+
+## Request
+
+### Query parameters
+
+<ParamField query="url" type="string" required>
+  The social media post URL being analyzed. Must exactly match the URL that was submitted to `POST /api/postcards` (the API normalizes both for comparison, so minor variations like trailing slashes are handled).
+</ParamField>
+
+## Responses
+
+The response shape varies based on the current analysis state. All responses use `Content-Type: application/json`.
+
+### Processing (status: "processing")
+
+Returned while the analysis is queued or actively running. The `stage` and `progress` fields let you show a progress indicator.
+
+<ResponseField name="status" type="string" required>
+  `"processing"` — analysis is in progress.
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  UUID of the postcard record.
+</ResponseField>
+
+<ResponseField name="stage" type="string">
+  Current pipeline stage key. One of: `starting`, `scraping`, `scraped`, `corroborating`, `auditing`, `scoring`, `complete`.
+</ResponseField>
+
+<ResponseField name="progress" type="number">
+  A float from `0.0` to `1.0` representing overall pipeline completion. Useful for progress bars.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable description of the current stage (e.g., `"Searching for primary sources..."`).
+</ResponseField>
+
+```json
+{
+  "status": "processing",
+  "stage": "corroborating",
+  "message": "Searching for primary sources...",
+  "progress": 0.4
+}
+```
+
+### Completed (status: "completed")
+
+The full forensic report is included in the response. No further polling is needed.
+
+<ResponseField name="status" type="string" required>
+  `"completed"`.
+</ResponseField>
+
+<ResponseField name="url" type="string" required>
+  The normalized URL that was analyzed.
+</ResponseField>
+
+<ResponseField name="platform" type="string" required>
+  Detected platform: `"X"`, `"YouTube"`, `"Reddit"`, `"Instagram"`, or `"Other"`.
+</ResponseField>
+
+<ResponseField name="postcardScore" type="number" required>
+  Composite credibility score from `0.0` (low credibility) to `1.0` (high credibility).
+</ResponseField>
+
+<ResponseField name="markdown" type="string" required>
+  Full extracted post content in Markdown format.
+</ResponseField>
+
+<ResponseField name="postcard" type="object">
+  Structured metadata extracted from the post.
+  <Expandable title="properties">
+    <ResponseField name="platform" type="string">
+      Platform enum: `"X"`, `"YouTube"`, `"Reddit"`, `"Instagram"`, or `"Other"`.
+    </ResponseField>
+    <ResponseField name="mainText" type="string">
+      Character-for-character extraction of the primary post content.
+    </ResponseField>
+    <ResponseField name="username" type="string">
+      User handle (e.g., `"@username"`).
+    </ResponseField>
+    <ResponseField name="timestampText" type="string">
+      Relative or absolute post date as displayed on the platform (e.g., `"2h ago"`).
+    </ResponseField>
+    <ResponseField name="engagement" type="object">
+      Key/value map of engagement metrics (e.g., likes, retweets) as strings.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="triangulation" type="object">
+  Source triangulation metadata.
+  <Expandable title="properties">
+    <ResponseField name="targetUrl" type="string">
+      The canonical URL of the post being analyzed.
+    </ResponseField>
+    <ResponseField name="queries" type="string[]">
+      List of search queries generated during source triangulation.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="audit" type="object">
+  Origin and temporal audit scores.
+  <Expandable title="properties">
+    <ResponseField name="originScore" type="number">
+      Score (0.0–1.0) reflecting how confidently the post's origin was traced.
+    </ResponseField>
+    <ResponseField name="temporalScore" type="number">
+      Score (0.0–1.0) reflecting temporal consistency between the post and corroborating sources.
+    </ResponseField>
+    <ResponseField name="totalScore" type="number">
+      Combined audit score (0.0–1.0).
+    </ResponseField>
+    <ResponseField name="auditLog" type="string[]">
+      Ordered list of audit reasoning steps as human-readable strings.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="corroboration" type="object">
+  Results of the AI-driven source corroboration pass.
+  <Expandable title="properties">
+    <ResponseField name="primarySources" type="object[]">
+      Array of sources found during corroboration.
+      <Expandable title="source properties">
+        <ResponseField name="url" type="string">
+          URL of the source article or page.
+        </ResponseField>
+        <ResponseField name="title" type="string">
+          Title of the source.
+        </ResponseField>
+        <ResponseField name="source" type="string">
+          Domain or publication name.
+        </ResponseField>
+        <ResponseField name="snippet" type="string">
+          Relevant excerpt from the source.
+        </ResponseField>
+        <ResponseField name="relevance" type="string">
+          Relationship to the post: `"supporting"`, `"refuting"`, or `"neutral"`.
+        </ResponseField>
+        <ResponseField name="publishedDate" type="string">
+          Publication date of the source (if available).
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="queriesExecuted" type="object[]">
+      Search queries performed during corroboration.
+      <Expandable title="query properties">
+        <ResponseField name="query" type="string">
+          The search query string.
+        </ResponseField>
+        <ResponseField name="sourcesFound" type="number">
+          Number of sources returned for this query.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="verdict" type="string">
+      Overall corroboration verdict: `"verified"`, `"disputed"`, `"inconclusive"`, or `"insufficient_data"`.
+    </ResponseField>
+    <ResponseField name="summary" type="string">
+      Human-readable summary of the corroboration findings.
+    </ResponseField>
+    <ResponseField name="confidenceScore" type="number">
+      Confidence in the verdict from `0.0` to `1.0`.
+    </ResponseField>
+    <ResponseField name="corroborationLog" type="string[]">
+      Ordered list of corroboration reasoning steps as human-readable strings.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 datetime when the analysis was created.
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  UUID of the completed postcard record. Use this as the `{id}` parameter for the [OG image endpoint](/api-reference/og-image).
+</ResponseField>
+
+```json
+{
+  "status": "completed",
+  "url": "https://x.com/user/status/123",
+  "platform": "X",
+  "postcardScore": 0.875,
+  "markdown": "# Post content...",
+  "postcard": {
+    "platform": "X",
+    "mainText": "Post content here...",
+    "username": "@username",
+    "timestampText": "2h ago"
+  },
+  "triangulation": {
+    "targetUrl": "https://x.com/user/status/123",
+    "queries": []
+  },
+  "audit": {
+    "originScore": 0.85,
+    "temporalScore": 0.9,
+    "totalScore": 0.875,
+    "auditLog": []
+  },
+  "corroboration": {
+    "primarySources": [],
+    "queriesExecuted": [],
+    "verdict": "verified",
+    "summary": "Content has been corroborated by trusted sources.",
+    "confidenceScore": 0.85,
+    "corroborationLog": []
+  },
+  "timestamp": "2026-04-04T12:00:00.000Z",
+  "id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### Failed (status: "failed")
+
+The analysis could not be completed. The `error` field contains a description of what went wrong.
+
+<ResponseField name="status" type="string" required>
+  `"failed"`.
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  UUID of the failed postcard record.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Description of the failure (e.g., `"Unable to access this content. Login or signup wall detected."`).
+</ResponseField>
+
+```json
+{
+  "status": "failed",
+  "error": "Unable to access this content. Login or signup wall detected."
+}
+```
+
+### Not found (404)
+
+No analysis exists for the given URL. Submit the URL via `POST /api/postcards` to start a trace.
+
+<ResponseField name="status" type="string" required>
+  `"not_found"`.
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  Human-readable message directing the caller to submit the URL.
+</ResponseField>
+
+```json
+{
+  "status": "not_found",
+  "error": "Analysis not found. Submit this URL via the Postcard UI to start a trace."
+}
+```
+
+## Polling pattern
+
+Poll this endpoint every 3–5 seconds after submitting a URL. Stop when `status` is `"completed"` or `"failed"`.
+
+```bash
+# Step 1: start analysis
+JOB=$(curl -s -X POST "https://postcard.fartlabs.org/api/postcards" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://x.com/user/status/123" }' | jq -r '.id')
+
+# Step 2: poll for completion
+while true; do
+  RESPONSE=$(curl -s "https://postcard.fartlabs.org/api/postcards?url=https://x.com/user/status/123")
+  STATUS=$(echo "$RESPONSE" | jq -r '.status')
+
+  if [ "$STATUS" = "completed" ]; then
+    echo "$RESPONSE" | jq '.postcard'
+    break
+  elif [ "$STATUS" = "failed" ]; then
+    echo "Error: $(echo "$RESPONSE" | jq -r '.error')"
+    break
+  fi
+
+  echo "Progress: $(echo "$RESPONSE" | jq -r '.progress // 0')"
+  sleep 3
+done
+```

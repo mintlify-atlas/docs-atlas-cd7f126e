@@ -1,0 +1,160 @@
+---
+title: "How it works"
+description: "The 4-stage forensic pipeline that traces posts back to their origin"
+---
+
+When you submit a social media post URL, Postcard runs a deterministic 4-stage forensic pipeline: **Ingest → Corroborate → Audit → Score**. Each stage feeds structured data into the next, and the final output is a **Postcard Score** between 0 and 100%.
+
+```
+Post URL
+    │
+    ▼
+┌───────────────────┐
+│ 1. Ingest         │  UnifiedPost strategy — platform-specific clients
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 2. Corroborate    │  Gemini — Google Dorking across trusted domains
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 3. Audit          │  Gemini — origin reachability & temporal alignment
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 4. Score          │  Weighted formula → Postcard Score (0–100%)
+└─────────┬─────────┘
+          ▼
+    PostcardReport
+```
+
+<Steps>
+  <Step title="Stage 1 — Ingest">
+    Postcard fetches live content and metadata from the submitted URL using a **strategy pattern**. The system inspects the URL and delegates to the most appropriate `UnifiedPostClient`:
+
+    | Platform | Strategy |
+    | :------- | :------- |
+    | Reddit | Native `.json` endpoint — character-perfect markdown |
+    | YouTube | oEmbed API for video metadata |
+    | X (Twitter), TikTok, Instagram | Official oEmbed APIs — captures author names and absolute timestamps |
+    | Any other URL | Jina Reader — high-fidelity markdown fallback |
+
+    If a specialized client fails (403, 404, or rate limit), the pipeline automatically falls back to Jina Reader.
+
+    **What the ingest stage produces:**
+
+    The client returns a `UnifiedPost` object that standardizes the fetched data for the rest of the pipeline. It contains:
+
+    - `platform` — Detected platform (`X`, `Reddit`, `YouTube`, `Instagram`, `Other`, etc.)
+    - `author` — Post author or username
+    - `timestamp` — Absolute timestamp of the post
+    - `markdown` — Full post content rendered as Markdown
+
+    <Info>
+      When a platform blocks access due to login walls or Cloudflare protection, Postcard surfaces the raw markdown retrieved during the attempt and returns an `insufficient_data` verdict rather than silently failing.
+    </Info>
+  </Step>
+
+  <Step title="Stage 2 — Corroborate">
+    The corroboration engine uses **Gemini with Google Search grounding** to find independent evidence for the post's claims. It executes targeted Google Dork queries restricted to a curated list of trusted domains:
+
+    ```
+    nytimes.com, washingtonpost.com, reuters.com, apnews.com, bbc.com,
+    theguardian.com, cnn.com, msnbc.com, foxnews.com, npr.org, wsj.com,
+    bloomberg.com, politico.com, thehill.com, usatoday.com, latimes.com,
+    axios.com, nbcnews.com, abcnews.com, cbsnews.com, snopes.com,
+    factcheck.org, politifact.com, fullfact.org, polymarket.com, wikipedia.org
+    ```
+
+    The agent executes up to **5 search tool calls** by default (configurable via `POSTCARD_MAX_TOOL_CALLS`) and collects up to **10 sources** (`POSTCARD_MAX_SOURCES`).
+
+    **How the confidence score is computed:**
+
+    Each source is classified as `supporting`, `refuting`, or `neutral`. The `confidenceScore` is derived by Gemini from the quality and relevance of the sources found. Trusted-domain sources are given higher weight.
+
+    The stage produces:
+    - `primarySources` — Ranked list of articles with URL, title, snippet, relevance, and publication date
+    - `queriesExecuted` — Every search query run and how many results it returned
+    - `verdict` — One of `verified`, `disputed`, `inconclusive`, or `insufficient_data`
+    - `corroborationLog` — Step-by-step audit trail of the agent's reasoning
+  </Step>
+
+  <Step title="Stage 3 — Audit">
+    The audit stage uses **Gemini with Google Search** to perform live site verification. The verifier agent checks two properties of the submitted URL:
+
+    **Origin reachability (`originScore`)** — Confirms that the post is still accessible at its claimed URL. The agent checks whether the URL hostname matches the declared platform (e.g., `x.com` for an X post). A clean match scores `1.0`; a mismatch defaults to `0.5`.
+
+    **Temporal alignment (`temporalScore`)** — Verifies that the post's timestamp is consistent with the reported narrative. The verifier uses Google Search to cross-check the publication date against when related content appeared in the public record. The current implementation defaults to `0.8` when no strong temporal contradiction is detected.
+
+    Both scores are floating-point values between 0 and 1. They feed directly into the final weighted formula. The agent also produces an `auditLog` — a structured record of every check performed — which is displayed in the forensic report UI.
+  </Step>
+
+  <Step title="Stage 4 — Score">
+    Postcard combines the four subscores into a single **Postcard Score** using a weighted formula. The weights are calibrated to prioritize origin reachability and independent corroboration:
+
+    ```typescript
+    // From src/lib/config.ts
+    export const SCORING_WEIGHTS = {
+      ORIGIN: 0.3,         // URL reachability
+      CORROBORATION: 0.25, // Independent source confidence
+      BIAS: 0.25,          // Ratio of supporting to total sources
+      TEMPORAL: 0.2,       // Timestamp alignment
+    };
+
+    const rawScore =
+      originScore        * SCORING_WEIGHTS.ORIGIN +
+      corroborationScore * SCORING_WEIGHTS.CORROBORATION +
+      biasScore          * SCORING_WEIGHTS.BIAS +
+      temporalScore      * SCORING_WEIGHTS.TEMPORAL;
+
+    const postcardScore = Math.floor(rawScore * 100); // 0–100 integer
+    ```
+
+    Where:
+    - `originScore` — From the Gemini verifier agent (0–1); `1.0` if hostname matches platform, `0.5` otherwise
+    - `corroborationScore` — The `confidenceScore` from the Gemini corroboration agent (0–1)
+    - `biasScore` — `supportingSources / totalSources`, defaults to `0.5` when no sources are found
+    - `temporalScore` — From the Gemini verifier agent (0–1); defaults to `0.8` when no temporal contradiction is found
+
+    The final score is an integer between 0 and 100. A higher score means the post is likely authentic, reachable at its origin, and well-corroborated by independent sources.
+  </Step>
+</Steps>
+
+## Result caching
+
+Postcard caches completed forensic reports at the **resolved post URL** level using Drizzle ORM with Turso/libSQL.
+
+- **Cache hit** — If a completed analysis already exists for the submitted URL, Postcard increments the `hits` counter on the stored record and serves the cached report immediately — no pipeline execution needed.
+- **Cache miss** — If no completed analysis exists, Postcard runs the full pipeline and persists the result to the database.
+- **Force refresh** — Pass `"refresh": true` in a `POST /api/postcards` request to bypass the cache and re-run the full pipeline.
+
+<Info>
+  Completed forensic reports are public. Any user can view a cached report by submitting the same URL — no Gemini API key is required to read existing analyses. A key is only needed to initiate a new trace or forced refresh.
+</Info>
+
+## Real-time progress stages
+
+While the pipeline runs, Postcard broadcasts progress updates that the UI polls every 3 seconds. Each update carries a `stage` key, a human-readable `message`, and a `progress` value (0–1):
+
+| `stage` | `message` | `progress` |
+| :------ | :-------- | :--------- |
+| `starting` | Initializing postcard... | `0` |
+| `scraping` | Fetching post content... | `0.1` |
+| `scraped` | Fetched content | `0.3` |
+| `corroborating` | Searching for primary sources... | `0.4` |
+| `auditing` | Verifying origin and temporal alignment... | `0.7` |
+| `scoring` | Calculating Postcard score... | `0.9` |
+| `complete` | Postcard complete | `1` |
+
+During long-running stages, a heartbeat pulse fires every 3 seconds with sub-messages like "Searching deep...", "Analyzing metadata...", and "Verifying source integrity..." to indicate that the pipeline is still active.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Verify your first post using the hosted demo or the public API
+  </Card>
+  <Card title="API reference" icon="code" href="/api-reference/overview">
+    Full endpoint documentation for programmatic access
+  </Card>
+</CardGroup>

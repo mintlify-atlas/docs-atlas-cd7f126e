@@ -1,0 +1,64 @@
+---
+title: "Authentication"
+description: "How to authenticate API requests with your Gemini API key"
+---
+
+Postcard uses a Google Gemini API key for AI-powered forensic analysis. Most endpoints are public — only the analysis submission endpoint accepts an optional key.
+
+## Public endpoints (no authentication required)
+
+The following endpoints return cached data and require no authentication:
+
+- `GET /api/postcards?url=` — retrieve any existing analysis result
+- `GET /api/postcards/{id}/og` — generate the Open Graph image for a completed analysis
+
+<Note>
+  Cached forensic reports are publicly accessible to anyone with the URL. You don't need an API key to read results that have already been computed.
+</Note>
+
+## Authenticated endpoint
+
+`POST /api/postcards` accepts an optional `userApiKey` field in the JSON request body. This key is passed through to the Google Gemini API to perform the AI analysis steps.
+
+### What the key is
+
+A **Google Gemini API key**. You can get one for free at [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys). The free tier includes a generous quota suitable for experimentation.
+
+### How to pass it
+
+Include `userApiKey` in the POST body alongside the required `url` field:
+
+```json
+{
+  "url": "https://x.com/user/status/123",
+  "userApiKey": "AIza..."
+}
+```
+
+There is **no Bearer token** or `Authorization` header. The key is sent in the request body only.
+
+### Request example
+
+```bash
+curl -X POST "https://postcard.fartlabs.org/api/postcards" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://x.com/user/status/123",
+    "userApiKey": "AIzaSy..."
+  }'
+```
+
+## What happens without a key
+
+`userApiKey` is optional. Postcard can use a server-side key configured by the instance operator (via the `GOOGLE_GENERATIVE_AI_API_KEY` environment variable).
+
+- If a server-side key is configured: the `userApiKey` field can be omitted and the analysis will proceed normally.
+- If no server-side key is configured **and** no `userApiKey` is provided: the analysis pipeline will transition to a `failed` state with an error indicating that no API key is available.
+
+<Warning>
+  Never include your Gemini API key in public client-side JavaScript or commit it to source control. The key grants access to your Gemini quota and may incur charges on paid tiers. For browser-based integrations, proxy the `POST /api/postcards` request through your own backend so the key is never exposed.
+</Warning>
+
+## Rate limiting implications
+
+The Gemini API key is used for each AI call during the forensic pipeline. The free tier enforces per-minute and per-day quotas. Heavy usage — especially running many analyses simultaneously — may hit these limits and cause analyses to fail. See [Rate limits](/api-reference/rate-limits) for details.

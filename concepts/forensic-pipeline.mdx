@@ -1,0 +1,155 @@
+---
+title: "Forensic pipeline"
+description: "The 4-stage pipeline that powers every Postcard analysis"
+---
+
+Every Postcard analysis runs through a four-stage forensic pipeline: ingest, corroborate, audit, and score. The pipeline runs asynchronously in the background after the API returns HTTP 202. Clients poll `GET /api/postcards?url=...` every 3–5 seconds to check progress.
+
+## Pipeline stages
+
+The stages are defined in `src/lib/config.ts` as `PIPELINE_STAGES`. Each stage carries a key, a user-facing message, and a progress value from 0 to 1.
+
+<Steps>
+  <Step title="starting — 0%">
+    Initializing postcard. A new row is inserted into the `postcards` table with `status: "processing"` and `stage: "starting"`. The pipeline ID is returned to the caller immediately.
+  </Step>
+  <Step title="scraping — 10%">
+    Fetching post content from the platform. The `UnifiedPostStrategy` inspects the URL, selects the appropriate ingestion client, and retrieves the post's markdown, author, and timestamp. If the primary client fails, the system falls back to Jina Reader.
+  </Step>
+  <Step title="scraped — 30%">
+    Content fetched successfully. The pipeline validates the scraped content: checks minimum length (50 characters), detects Cloudflare challenges, and flags login walls. If validation fails, the pipeline sets `verdict: "insufficient_data"` and halts without proceeding to corroboration.
+  </Step>
+  <Step title="corroborating — 40%">
+    Searching for primary sources with Gemini. The corroboration agent uses Gemini's `google_search` tool to find independent sources from trusted domains that support or refute the post's claims. Up to `POSTCARD_MAX_TOOL_CALLS` (default: 5) search queries are executed, returning up to `POSTCARD_MAX_SOURCES` (default: 10) sources.
+  </Step>
+  <Step title="auditing — 70%">
+    Verifying origin and temporal alignment. The verifier agent checks whether the URL is reachable, whether the hostname matches the declared platform, and whether the post's timestamp is consistent with search results.
+  </Step>
+  <Step title="scoring — 90%">
+    Calculating the Postcard score. The four subscores are combined with their configured weights. The result is floored to an integer (0–100) and written to the `postcards` table alongside the verdict and all source data.
+  </Step>
+  <Step title="complete — 100%">
+    Analysis done. The `status` field is updated to `"completed"`. The full forensic report is available via `GET /api/postcards?url=...`.
+  </Step>
+</Steps>
+
+The raw stage definitions from `src/lib/config.ts`:
+
+```typescript
+export const PIPELINE_STAGES: PipelineStage[] = [
+  { key: "starting",      message: "Initializing postcard...",                  progress: 0   },
+  { key: "scraping",      message: "Fetching post content...",                  progress: 0.1 },
+  { key: "scraped",       message: "Fetched content",                           progress: 0.3 },
+  { key: "corroborating", message: "Searching for primary sources...",          progress: 0.4 },
+  { key: "auditing",      message: "Verifying origin and temporal alignment...", progress: 0.7 },
+  { key: "scoring",       message: "Calculating Postcard score...",             progress: 0.9 },
+  { key: "complete",      message: "Postcard complete",                         progress: 1   },
+];
+```
+
+## The heartbeat pulse system
+
+Long-running stages (corroborating, auditing) can take 10–30 seconds. To reassure users that the system is still working, each slow stage activates a heartbeat pulse via `createPulse()` in `src/lib/postcard.ts`.
+
+The pulse fires every 3 seconds and cycles through rotating sub-messages:
+
+```typescript
+const pulseMessages = [
+  "Searching deep...",
+  "Analyzing metadata...",
+  "Confirming platform response...",
+  "Still working...",
+  "Verifying source integrity...",
+];
+```
+
+These messages are appended with animated dot indicators (`""`, `"."`, `".."`, `"..."`) and written back to the `postcards` table so polling clients always see a fresh message. The pulse is stopped as soon as the stage completes.
+
+## Async background processing
+
+The pipeline runs entirely server-side. The POST endpoint returns HTTP 202 immediately after creating the `postcards` row. The actual pipeline runs in a detached async context.
+
+```
+Client                        Server
+  │                              │
+  │── POST /api/postcards ───────►│  Creates DB row, returns 202
+  │◄── 202 { id, status } ───────│
+  │                              │  Pipeline runs in background
+  │── GET /api/postcards?url= ───►│
+  │◄── 200 { status: "processing", progress: 0.4 } ──│
+  │                              │
+  │── GET /api/postcards?url= ───►│
+  │◄── 200 { status: "completed", postcardScore: 0.85 } ──│
+```
+
+## Cache check before running
+
+Before the pipeline starts, the system checks for an existing completed result at the normalized URL:
+
+```typescript
+const cachedResult = await db
+  .select()
+  .from(postcards)
+  .innerJoin(posts, eq(posts.url, normalizedUrl))
+  .orderBy(sql`${postcards.createdAt} DESC`)
+  .limit(1);
+```
+
+If a completed result exists and `refresh` is not set, the cached result is returned immediately without running the pipeline. See [Caching](/concepts/caching) for full details.
+
+## Concurrent request deduplication
+
+If a pipeline is already `"processing"` for a given URL, new requests for that same URL poll the existing pipeline rather than starting a second one. This prevents duplicate Gemini API calls for the same content.
+
+```typescript
+export async function getExistingProcessingPostcard(url: string) {
+  const normalized = normalizePostUrl(url);
+  const result = await db
+    .select()
+    .from(postcards)
+    .innerJoin(posts, eq(posts.id, postcards.postId))
+    .where(and(eq(posts.url, normalized), eq(postcards.status, "processing")))
+    .orderBy(sql`${postcards.createdAt} DESC`)
+    .limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+```
+
+## Status lifecycle
+
+A postcard row moves through these status values over its lifetime:
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Row created, pipeline not yet started |
+| `processing` | Pipeline is actively running |
+| `completed` | Pipeline finished; forensic report available |
+| `failed` | An unrecoverable error occurred |
+
+## Failure handling
+
+The pipeline sets `status: "failed"` when it encounters:
+
+- **Login wall** — scraped markdown contains `"login"` or `"sign in"`
+- **Cloudflare block** — markdown contains `"Checking if the site connection is secure"`
+- **Content too short** — markdown is fewer than 50 characters
+- **Platform not recognized** — `platform` resolves to `"Other"` after scraping
+- **API errors** — Gemini rate limits (HTTP 429) or network failures
+
+When a failure occurs before the DB row is created, the error is surfaced in the API response directly. When the row exists, the `error` column is populated with the error message.
+
+## Fake mode
+
+Set `NEXT_PUBLIC_FAKE_PIPELINE=true` to replace the live pipeline with mock data. Useful for demos or development when you want to avoid hitting the Gemini API quota.
+
+```bash
+NEXT_PUBLIC_FAKE_PIPELINE=true
+NEXT_PUBLIC_FAKE_PIPELINE_DELAY=2000   # Optional: ms of artificial delay
+NEXT_PUBLIC_FAKE_PIPELINE_FAIL=true    # Optional: force pipeline to fail
+```
+
+In fake mode, the pipeline still steps through all `PIPELINE_STAGES` with the configured delay, but returns a hardcoded `PostcardResponse` with a `postcardScore` of `0.85` and a `"verified"` verdict. Any URL containing the string `"fail"` will trigger a fake failure regardless of `NEXT_PUBLIC_FAKE_PIPELINE_FAIL`.
+
+<Note>
+Fake mode is controlled by a `NEXT_PUBLIC_` variable, which means it is embedded into the client bundle at build time. You must rebuild the application after changing it.
+</Note>
